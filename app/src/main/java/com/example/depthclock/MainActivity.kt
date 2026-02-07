@@ -1,7 +1,5 @@
 package com.example.depthclock
 
-import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.clickable // Скорее всего понадобится для нажатия на цифры шкалыgit init
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
@@ -55,15 +53,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.rememberModalBottomSheetState
-import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -120,7 +110,7 @@ fun AdvancedDepthClockApp() {
     var clockScale by remember { mutableFloatStateOf(1f) }
     var clockOffset by remember { mutableStateOf(Offset.Zero) }
 
-    // Состояние прозрачности
+    // Состояние прозрачности (Храним данные здесь)
     var isAlphaEnabled by remember { mutableStateOf(false) }
     var clockAlpha by remember { mutableFloatStateOf(0.5f) }
 
@@ -278,119 +268,15 @@ fun AdvancedDepthClockApp() {
             }
         }
 
-        // 6. ДИАЛОГОВОЕ ОКНО НАСТРОЕК
+        // 6. ДИАЛОГОВОЕ ОКНО НАСТРОЕК (Вынесено в отдельный файл)
         if (showSettingsDialog) {
-            Dialog(onDismissRequest = { showSettingsDialog = false }) {
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 6.dp,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "Настройки вида",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                                .padding(16.dp)
-                        ) {
-                            // Заголовок и переключатель
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column {
-                                    Text("Прозрачность", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
-                                    Text(
-                                        text = "${(clockAlpha * 100).roundToInt()}%",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        color = if (isAlphaEnabled) MaterialTheme.colorScheme.primary else Color.Gray
-                                    )
-                                }
-                                Switch(
-                                    checked = isAlphaEnabled,
-                                    onCheckedChange = { isAlphaEnabled = it }
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // СЛАЙДЕР
-                            // steps = 0 (или отсутствие параметра) позволяет выбирать ЛЮБОЕ значение
-                            Slider(
-                                value = clockAlpha,
-                                onValueChange = { clockAlpha = it },
-                                enabled = isAlphaEnabled,
-                                valueRange = 0f..1f,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-
-                            // ШКАЛА С РИСКАМИ И ЦИФРАМИ
-                            // Создаем ряд с подписями 0, 25, 50, 75, 100
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    // Небольшой отступ по бокам, чтобы выровнять цифры с началом/концом слайдера
-                                    .padding(horizontal = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                val steps = listOf(0, 25, 50, 75, 100)
-                                steps.forEach { step ->
-                                    // Колонка: Палочка (риска) + Текст
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            // Делаем область кликабельной для быстрого выбора
-                                            .clickable(enabled = isAlphaEnabled) {
-                                                clockAlpha = step / 100f
-                                            }
-                                            .padding(4.dp) // Увеличиваем область нажатия
-                                    ) {
-                                        // Риска (палочка)
-                                        Box(
-                                            modifier = Modifier
-                                                .width(2.dp)
-                                                .height(4.dp)
-                                                .background(
-                                                    if (isAlphaEnabled) Color.Gray.copy(alpha = 0.5f) else Color.Gray.copy(alpha = 0.2f)
-                                                )
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        // Текст
-                                        Text(
-                                            text = "$step",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isAlphaEnabled) Color.Gray else Color.Gray.copy(alpha = 0.5f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(24.dp))
-
-                        Button(
-                            onClick = { showSettingsDialog = false },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Text("Закрыть")
-                        }
-                    }
-                }
-            }
+            SettingsDialog(
+                onDismiss = { showSettingsDialog = false },
+                isAlphaEnabled = isAlphaEnabled,
+                onAlphaEnabledChange = { isAlphaEnabled = it },
+                clockAlpha = clockAlpha,
+                onClockAlphaChange = { clockAlpha = it }
+            )
         }
     }
 }
