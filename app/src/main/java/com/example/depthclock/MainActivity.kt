@@ -54,6 +54,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.filled.Settings
+import android.content.Context
+import androidx.compose.ui.graphics.toArgb
+import java.io.File
+import java.io.FileOutputStream
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -105,20 +109,45 @@ fun AdvancedDepthClockApp() {
     var originalBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var foregroundBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    // Состояние часов
     var clockColor by remember { mutableStateOf(Color.White) }
     var clockScale by remember { mutableFloatStateOf(1f) }
     var clockOffset by remember { mutableStateOf(Offset.Zero) }
 
-    // Состояние прозрачности (Храним данные здесь)
     var isAlphaEnabled by remember { mutableStateOf(false) }
     var clockAlpha by remember { mutableFloatStateOf(0.5f) }
 
-    // Режимы
     var isEditing by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
-
     var showWarning by remember { mutableStateOf(false) }
+
+    // --- 1. ЗАГРУЗКА ДАННЫХ ПРИ ЗАПУСКЕ ---
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val savedState = loadAppState(context)
+            savedState?.let { state ->
+                // Обновляем UI в главном потоке
+                withContext(Dispatchers.Main) {
+                    originalBitmap = state.bgBitmap
+                    foregroundBitmap = state.fgBitmap
+                    clockColor = state.color
+                    clockScale = state.scale
+                    clockOffset = state.offset
+                    isAlphaEnabled = state.isAlphaEnabled
+                    clockAlpha = state.clockAlpha
+                }
+            }
+        }
+    }
+
+    // Вспомогательная функция для сохранения (чтобы не дублировать код)
+    fun saveCurrentState() {
+        scope.launch(Dispatchers.IO) {
+            saveAppState(
+                context, originalBitmap, foregroundBitmap, clockColor,
+                clockScale, clockOffset, isAlphaEnabled, clockAlpha
+            )
+        }
+    }
 
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
@@ -140,7 +169,6 @@ fun AdvancedDepthClockApp() {
                 foregroundBitmap = null
                 showWarning = false
                 isEditing = false
-
                 isAlphaEnabled = false
                 clockAlpha = 0.5f
 
@@ -149,7 +177,11 @@ fun AdvancedDepthClockApp() {
                 clockColor = dominantColor?.let { Color(it) } ?: Color.White
 
                 processImage(bitmap,
-                    onSuccess = { fg -> foregroundBitmap = fg },
+                    onSuccess = { fg ->
+                        foregroundBitmap = fg
+                        // СОХРАНЯЕМ СРАЗУ ПОСЛЕ ОБРАБОТКИ ФОТО
+                        saveCurrentState()
+                    },
                     onError = { showWarning = true }
                 )
             }
@@ -157,7 +189,6 @@ fun AdvancedDepthClockApp() {
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
-
         // 1. ФОН
         originalBitmap?.let {
             Image(
@@ -212,7 +243,11 @@ fun AdvancedDepthClockApp() {
                         }
                     }
                     .pointerInput(Unit) {
-                        detectTapGestures(onTap = { isEditing = false })
+                        detectTapGestures(onTap = {
+                            isEditing = false
+                            // СОХРАНЯЕМ ПРИ ВЫХОДЕ ИЗ РЕДАКТИРОВАНИЯ
+                            saveCurrentState()
+                        })
                     }
             ) {
                 Text(
@@ -268,10 +303,14 @@ fun AdvancedDepthClockApp() {
             }
         }
 
-        // 6. ДИАЛОГОВОЕ ОКНО НАСТРОЕК (Вынесено в отдельный файл)
+        // 6. ДИАЛОГ
         if (showSettingsDialog) {
             SettingsDialog(
-                onDismiss = { showSettingsDialog = false },
+                onDismiss = {
+                    showSettingsDialog = false
+                    // СОХРАНЯЕМ ПРИ ЗАКРЫТИИ НАСТРОЕК
+                    saveCurrentState()
+                },
                 isAlphaEnabled = isAlphaEnabled,
                 onAlphaEnabledChange = { isAlphaEnabled = it },
                 clockAlpha = clockAlpha,
@@ -388,4 +427,100 @@ fun processImage(inputBitmap: Bitmap, onSuccess: (Bitmap) -> Unit, onError: () -
             result.foregroundBitmap?.let(onSuccess) ?: onError()
         }
         .addOnFailureListener { onError() }
+}
+
+// --- ЛОГИКА СОХРАНЕНИЯ И ЗАГРУЗКИ ---
+
+fun saveAppState(
+    context: Context,
+    bgBitmap: Bitmap?,
+    fgBitmap: Bitmap?,
+    clockColor: Color,
+    scale: Float,
+    offset: Offset,
+    isAlphaEnabled: Boolean,
+    clockAlpha: Float
+) {
+    // 1. Сохраняем настройки (числа и булевы значения)
+    val prefs = context.getSharedPreferences("ClockPrefs", Context.MODE_PRIVATE)
+    prefs.edit().apply {
+        putInt("color", clockColor.toArgb())
+        putFloat("scale", scale)
+        putFloat("offsetX", offset.x)
+        putFloat("offsetY", offset.y)
+        putBoolean("isAlphaEnabled", isAlphaEnabled)
+        putFloat("clockAlpha", clockAlpha)
+        putBoolean("hasImages", bgBitmap != null) // Флаг, есть ли сохраненные картинки
+        apply()
+    }
+
+    // 2. Сохраняем картинки в файлы (асинхронно или в фоновом потоке в идеале, но для простоты здесь)
+    // Важно: В реальном проекте операции ввода-вывода лучше делать через Coroutines (Dispatchers.IO)
+    if (bgBitmap != null) {
+        saveBitmapToFile(context, bgBitmap, "background.png")
+    }
+    if (fgBitmap != null) {
+        saveBitmapToFile(context, fgBitmap, "foreground.png")
+    }
+}
+
+fun saveBitmapToFile(context: Context, bitmap: Bitmap, fileName: String) {
+    try {
+        val file = File(context.filesDir, fileName)
+        val stream = FileOutputStream(file)
+        bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
+        stream.flush()
+        stream.close()
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+}
+
+// Data Class для возврата всех данных сразу
+data class AppState(
+    val bgBitmap: Bitmap?,
+    val fgBitmap: Bitmap?,
+    val color: Color,
+    val scale: Float,
+    val offset: Offset,
+    val isAlphaEnabled: Boolean,
+    val clockAlpha: Float
+)
+
+fun loadAppState(context: Context): AppState? {
+    val prefs = context.getSharedPreferences("ClockPrefs", Context.MODE_PRIVATE)
+
+    // Если картинок не было сохранено, считаем, что сохранений нет
+    if (!prefs.getBoolean("hasImages", false)) return null
+
+    // Загружаем настройки
+    val color = Color(prefs.getInt("color", Color.White.toArgb()))
+    val scale = prefs.getFloat("scale", 1f)
+    val offsetX = prefs.getFloat("offsetX", 0f)
+    val offsetY = prefs.getFloat("offsetY", 0f)
+    val isAlphaEnabled = prefs.getBoolean("isAlphaEnabled", false)
+    val clockAlpha = prefs.getFloat("clockAlpha", 0.5f)
+
+    // Загружаем картинки
+    val bgBitmap = loadBitmapFromFile(context, "background.png")
+    val fgBitmap = loadBitmapFromFile(context, "foreground.png")
+
+    return AppState(
+        bgBitmap, fgBitmap, color, scale, Offset(offsetX, offsetY), isAlphaEnabled, clockAlpha
+    )
+}
+
+fun loadBitmapFromFile(context: Context, fileName: String): Bitmap? {
+    return try {
+        val file = File(context.filesDir, fileName)
+        if (file.exists()) {
+            val source = ImageDecoder.createSource(file)
+            ImageDecoder.decodeBitmap(source).copy(Bitmap.Config.ARGB_8888, true)
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
 }
